@@ -11,72 +11,61 @@ st.info(
     "Die Datei muss die Spalten 'Id', 'ParentId' und 'DisplayName' enthalten."
 )
 
-# --- Core Logic Function (final, robust version) ---
+# --- Core Logic Function (mit visueller Baumstruktur) ---
 @st.cache_data
 def build_hierarchical_df(_df):
     """
-    Transforms a flat dataframe into a hierarchical one with alphabetical sorting.
-    Handles mixed data types in DisplayName by converting them to strings for sorting.
+    Baut eine visuell klare Baumstruktur mit Emojis, sortiert auf jeder Ebene.
     """
-    # Ensure DisplayName is always treated as a string to prevent sorting errors
     _df['DisplayName'] = _df['DisplayName'].astype(str)
-
     name_dict = _df.set_index('Id')['DisplayName'].to_dict()
     child_dict = _df.groupby('ParentId')['Id'].apply(list).to_dict()
     hierarchical_rows = []
 
-    def find_children(parent_id, level):
+    def find_children(parent_id, prefix=""):
         if parent_id not in child_dict:
             return
 
-        # Create a list of tuples (DisplayName, Id) for sorting
-        children_to_sort = [
-            (name_dict.get(child_id, ""), child_id)
-            for child_id in child_dict[parent_id]
-        ]
+        children_to_sort = sorted(
+            [(name_dict.get(child_id, ""), child_id) for child_id in child_dict[parent_id]]
+        )
         
-        # Sort the list alphabetically by name
-        sorted_children = sorted(children_to_sort)
-
-        # Iterate through the now sorted children
-        for _, child_id in sorted_children:
-            indentation = "· · " * level
-            display_name_indented = f"{indentation}{name_dict.get(child_id, 'N/A')}"
+        num_children = len(children_to_sort)
+        for i, (_, child_id) in enumerate(children_to_sort):
+            is_last = (i == num_children - 1)
+            connector = "┗━ " if is_last else "┣━ "
+            
+            display_name_indented = f"{prefix}{connector}{name_dict.get(child_id, 'N/A')}"
             hierarchical_rows.append({
                 'Id': child_id,
                 'ParentId': parent_id,
                 'DisplayName_Indented': display_name_indented,
                 'Original_DisplayName': name_dict.get(child_id, 'N/A')
             })
-            find_children(child_id, level + 1)
 
-    # Identify and sort root nodes
+            # Den Prefix für die nächste Ebene vorbereiten
+            new_prefix = prefix + ("    " if is_last else "┃   ")
+            find_children(child_id, prefix=new_prefix)
+
+    # Wurzel-Elemente identifizieren und sortieren
     root_ids = _df[~_df['ParentId'].isin(_df['Id'])]['Id'].tolist()
-    # Add children of ParentId 0 if it's used as a root identifier
     if 0 in child_dict:
         root_ids.extend(child_id for child_id in child_dict[0] if child_id not in root_ids)
     
-    root_tuples_to_sort = [
-        (name_dict.get(root_id, ""), root_id)
-        for root_id in set(root_ids)
-    ]
-    sorted_roots = sorted(root_tuples_to_sort)
+    sorted_roots = sorted([(name_dict.get(root_id, ""), root_id) for root_id in set(root_ids)])
 
     for _, root_id in sorted_roots:
         hierarchical_rows.append({
-            'Id': root_id,
-            'ParentId': 0,
-            'DisplayName_Indented': name_dict.get(root_id, 'N/A'),
+            'Id': root_id, 'ParentId': 0,
+            'DisplayName_Indented': f"📁 {name_dict.get(root_id, 'N/A')}", # Wurzel-Elemente mit Ordner-Emoji
             'Original_DisplayName': name_dict.get(root_id, 'N/A')
         })
-        find_children(root_id, level=1)
+        find_children(root_id, prefix="")
     
     final_df = pd.DataFrame(hierarchical_rows)
     if not final_df.empty:
         final_df['In Scope'] = True
     return final_df
-
-
 # --- Streamlit UI ---
 uploaded_file = st.file_uploader("Wählen Sie Ihre CSV-Exportdatei", type="csv")
 
