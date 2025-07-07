@@ -7,7 +7,7 @@ st.title("Migration Scope Entscheidung")
 # CSV Upload
 uploaded_file = st.file_uploader("Lade die CSV-Datei hoch", type="csv")
 if uploaded_file:
-    df = pd.read_csv(uploaded_file)
+    df = pd.read_csv(uploaded_file, sep=";", quotechar='"', encoding="utf-8", on_bad_lines="skip")
 
     # Strukturaufbau
     st.subheader("Hierarchie")
