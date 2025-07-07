@@ -11,31 +11,34 @@ st.info(
     "Die Datei muss die Spalten 'Id', 'ParentId' und 'DisplayName' enthalten."
 )
 
-# --- Core Logic Function (mit alphabetischer Sortierung) ---
+# --- Core Logic Function (final, robust version) ---
 @st.cache_data
-def build_hierarchical_df(_df): # Added underscore to avoid name collision
+def build_hierarchical_df(_df):
     """
-    Transforms a flat dataframe into a hierarchical one
-    with indentation for display, now with alphabetical sorting at each level.
+    Transforms a flat dataframe into a hierarchical one with alphabetical sorting.
+    Handles mixed data types in DisplayName by converting them to strings for sorting.
     """
+    # Ensure DisplayName is always treated as a string to prevent sorting errors
+    _df['DisplayName'] = _df['DisplayName'].astype(str)
+
     name_dict = _df.set_index('Id')['DisplayName'].to_dict()
     child_dict = _df.groupby('ParentId')['Id'].apply(list).to_dict()
     hierarchical_rows = []
 
     def find_children(parent_id, level):
         if parent_id not in child_dict:
-            return # No children, end of branch
+            return
 
-        # --- NEU: Kinder alphabetisch nach DisplayName sortieren ---
-        # Erstelle eine Liste von Tupeln (DisplayName, Id) zum Sortieren
+        # Create a list of tuples (DisplayName, Id) for sorting
         children_to_sort = [
             (name_dict.get(child_id, ""), child_id)
             for child_id in child_dict[parent_id]
         ]
-        # Sortiere die Liste alphabetisch nach dem Namen
+        
+        # Sort the list alphabetically by name
         sorted_children = sorted(children_to_sort)
 
-        # Iteriere durch die jetzt sortierten Kinder
+        # Iterate through the now sorted children
         for _, child_id in sorted_children:
             indentation = "· · " * level
             display_name_indented = f"{indentation}{name_dict.get(child_id, 'N/A')}"
@@ -45,53 +48,32 @@ def build_hierarchical_df(_df): # Added underscore to avoid name collision
                 'DisplayName_Indented': display_name_indented,
                 'Original_DisplayName': name_dict.get(child_id, 'N/A')
             })
-            # --- REKURSION ---
             find_children(child_id, level + 1)
 
-    # Die Logik für die Wurzel-Elemente bleibt gleich, wird aber auch sortiert
-    root_ids_to_sort = [
-        (name_dict.get(root_id, ""), root_id)
-        for root_id in _df[~_df['ParentId'].isin(_df['Id'])]['Id'].tolist()
-    ]
+    # Identify and sort root nodes
+    root_ids = _df[~_df['ParentId'].isin(_df['Id'])]['Id'].tolist()
+    # Add children of ParentId 0 if it's used as a root identifier
     if 0 in child_dict:
-        root_ids_to_sort.extend(
-            (name_dict.get(root_id, ""), root_id)
-            for root_id in child_dict[0]
-        )
+        root_ids.extend(child_id for child_id in child_dict[0] if child_id not in root_ids)
     
-    sorted_roots = sorted(list(set(root_ids_to_sort)))
+    root_tuples_to_sort = [
+        (name_dict.get(root_id, ""), root_id)
+        for root_id in set(root_ids)
+    ]
+    sorted_roots = sorted(root_tuples_to_sort)
 
     for _, root_id in sorted_roots:
-         hierarchical_rows.append({
+        hierarchical_rows.append({
             'Id': root_id,
             'ParentId': 0,
             'DisplayName_Indented': name_dict.get(root_id, 'N/A'),
             'Original_DisplayName': name_dict.get(root_id, 'N/A')
-         })
-         find_children(root_id, level=1)
+        })
+        find_children(root_id, level=1)
     
     final_df = pd.DataFrame(hierarchical_rows)
-    final_df['In Scope'] = True
-    return final_df
-
-    # Start the process from the root nodes (those with ParentId = 0 or a ParentId not present in the Id column)
-    root_ids = df[~df['ParentId'].isin(df['Id'])]['Id'].tolist()
-    # It's common to use 0 as the root identifier, so we add it if it exists.
-    if 0 in child_dict and 0 not in root_ids:
-       root_ids.extend(child_dict[0])
-
-    for root_id in sorted(list(set(root_ids))):
-         hierarchical_rows.append({
-            'Id': root_id,
-            'ParentId': 0, # Assuming root
-            'DisplayName_Indented': name_dict.get(root_id, 'N/A'),
-            'Original_DisplayName': name_dict.get(root_id, 'N/A')
-         })
-         find_children(root_id, level=1)
-    
-    # Create the final DataFrame to be displayed
-    final_df = pd.DataFrame(hierarchical_rows)
-    final_df['In Scope'] = True # Add the interactive checkbox column, default to True
+    if not final_df.empty:
+        final_df['In Scope'] = True
     return final_df
 
 
