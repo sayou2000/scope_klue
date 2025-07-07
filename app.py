@@ -1,48 +1,58 @@
 import streamlit as st
 import pandas as pd
-from anytree import Node, RenderTree, PreOrderIter
 
-st.title("Migration Scope Entscheidung")
+st.set_page_config(layout="wide")
+st.title("Migration Scope Entscheidung (Flache Ansicht)")
 
 # CSV Upload
 uploaded_file = st.file_uploader("Lade die CSV-Datei hoch", type="csv")
 if uploaded_file:
-    df = pd.read_csv(uploaded_file, sep=";", quotechar='"', encoding="utf-8", on_bad_lines="skip")
+    # CSV laden
+    df = pd.read_csv(uploaded_file, sep=";", quotechar='"', encoding="utf-8")
 
-    # Strukturaufbau
-    st.subheader("Hierarchie")
-    nodes = {}
-    for _, row in df.iterrows():
-        tid = row["TenantId"]
-        pid = row["ParentId"]
-        label = f"{row['DisplayName']} ({tid})"
-        if pd.isna(pid):
-            nodes[tid] = Node(label)
-        else:
-            parent_node = nodes.get(pid)
-            if parent_node:
-                nodes[tid] = Node(label, parent=parent_node)
-            else:
-                nodes[tid] = Node(label)  # später verwaiste behandeln
+    # Basis-Checks
+    required_columns = {"TenantId", "ParentId", "DisplayName"}
+    if not required_columns.issubset(df.columns):
+        st.error(f"CSV muss folgende Spalten enthalten: {', '.join(required_columns)}")
+        st.stop()
 
-    # Visualisierung
-    for node in PreOrderIter(list(nodes.values())[0]):
-        indent = " " * node.depth
-        st.write(f"{indent}🔹 {node.name}")
+    # Pfad berechnen (flach, rekursiv über ParentId)
+    id_map = df.set_index("TenantId")[["ParentId", "DisplayName"]].to_dict("index")
 
-    # Entscheidung
+    def build_path(tenant_id):
+        path = []
+        current = tenant_id
+        seen = set()
+        while current in id_map and current not in seen:
+            seen.add(current)
+            path.insert(0, id_map[current]["DisplayName"])
+            current = id_map[current]["ParentId"]
+        return " > ".join(path)
+
+    df["Pfad"] = df["TenantId"].apply(build_path)
+
+    # Scope-Spalte initialisieren
+    if "Scope" not in df.columns:
+        df["Scope"] = "Unentschieden"
+
+    # Filteroptionen (optional erweitern)
+    st.subheader("Filter")
+    search_term = st.text_input("Suche nach Objektnamen oder Pfad")
+    filtered_df = df[df["Pfad"].str.contains(search_term, case=False, na=False)] if search_term else df
+
+    # Auswahl pro Zeile (In/Out of Scope)
     st.subheader("Scope-Festlegung")
-    scope_results = []
-    for node in PreOrderIter(list(nodes.values())[0]):
-        indent = " " * node.depth
-        scope = st.radio(f"{indent}{node.name}", ["In Scope", "Out of Scope"], horizontal=True, key=node.name)
-        scope_results.append({
-            "TenantId": node.name.split("(")[-1].rstrip(")"),
-            "DisplayName": node.name.split("(")[0].strip(),
-            "Scope": scope
-        })
 
-    # Download
-    if st.button("CSV mit Scope-Entscheidung exportieren"):
-        result_df = pd.DataFrame(scope_results)
-        st.download_button("Herunterladen", result_df.to_csv(index=False), file_name="scope_entscheidung.csv")
+    for idx, row in filtered_df.iterrows():
+        scope = st.radio(
+            f"{row['Pfad']} ({row['TenantId']})",
+            ["Unentschieden", "In Scope", "Out of Scope"],
+            index=["Unentschieden", "In Scope", "Out of Scope"].index(row["Scope"]),
+            key=f"scope_{row['TenantId']}"
+        )
+        df.at[idx, "Scope"] = scope
+
+    # Export
+    st.subheader("Export")
+    export_df = df[["TenantId", "DisplayName", "Pfad", "Scope"]]
+    st.download_button("📥 CSV mit Entscheidungen herunterladen", export_df.to_csv(index=False), file_name="scope_entscheidungen.csv")
