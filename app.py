@@ -76,8 +76,8 @@ uploaded_file = st.file_uploader("Wählen Sie Ihre CSV-Exportdatei", type="csv")
 if uploaded_file is not None:
     try:
         # Load the raw data
-        raw_df = pd.read_csv(uploaded_file)
-
+        raw_df = pd.read_csv(uploaded_file, sep=";", quotechar='"', encoding="utf-8")
+       
         # Check for required columns
         required_columns = ['Id', 'ParentId', 'DisplayName']
         if not all(col in raw_df.columns for col in required_columns):
